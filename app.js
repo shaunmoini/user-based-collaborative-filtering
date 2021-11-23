@@ -4,6 +4,17 @@ const rl = require('readline/promises').createInterface({
   output: process.stdout
 });
 
+// removes a specified index from a given array
+function removeIndex(arr, i) {
+  return arr.slice(0, i).concat(arr.slice(i + 1));
+}
+
+// returns the n nearest neighbours
+function getNearestNeighbours(arr, n) {
+  arr.sort((a, b) => { return b.correlation - a.correlation });
+  return arr.slice(0, n);
+}
+
 // returns indices of array that match value
 function getMatchingIndicies(arr, val) {
   var indicies = [];
@@ -12,17 +23,6 @@ function getMatchingIndicies(arr, val) {
       indicies.push(i);
 
   return indicies;
-}
-
-// removes a specified index from a given array
-function removeIndex(arr, i) {
-  return arr.slice(0, i).concat(arr.slice(i + 1));
-}
-
-// returns the n largest values of an array
-function nLargestValues(arr, n) {
-  arr.sort((a, b) => { return b.correlation - a.correlation });
-  return arr.slice(0, n);
 }
 
 // returns the sets of items that both user a and b have rated
@@ -44,37 +44,37 @@ function mean(arr) {
   return filteredArr.reduce((a, b) => a + b) / filteredArr.length;
 }
 
-function standardDev(arr) {
-  let filteredArr = arr.filter((x) => { return x != -1 })
-  let average = mean(filteredArr);
-  return Math.sqrt(filteredArr.map(x => Math.pow(x - average, 2)).reduce((a, b) => a + b) / filteredArr.length);
+function standardDev(arr, avg) {
+  let filteredArr = arr.filter((x) => { return x != -1 });
+  return Math.sqrt(filteredArr.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b));
 }
 
 // calculates sim(a, b) and returns an array of objects representing 
 function getSimilarity(user, users) {
   let similarities = [];
+  let userMean = mean(user.ratings);
+
   for (let i = 0; i < users.length; i++) {
     let commonSet = getCommonSet(user.ratings, users[i].ratings);
     let a = commonSet[0];
     let b = commonSet[1];
 
     let numerator = 0;
-    let denominator = 0;
-    for (let j = 0; j < a.length; j++) {
-      numerator += (a[j] - mean(a)) * (b[j] - mean(b));
-      denominator += standardDev(a) * standardDev(b);
-    }
-    
-    if (denominator == 0) similarities.push({ user: users[i].user, ratings: users[i].ratings, correlation: 0 });
-    else similarities.push({ user: users[i].user, ratings: users[i].ratings, correlation: numerator / denominator });
+    let denominator = standardDev(a, userMean) * standardDev(b, mean(users[i].ratings));
+    for (let j = 0; j < a.length; j++) numerator += (a[j] - userMean) * (b[j] - mean(users[i].ratings));
+
+    let result = denominator != 0 ? numerator / denominator : 0;
+    similarities.push({ user: users[i].user, ratings: users[i].ratings, correlation: result });
   }
 
   return similarities;
 }
 
 // calculates pred(a, p) and returns array with -1 values replaced with predicited value
-function getPrediction(user, users, unratedItems) {
+function getPrediction(user, users) {
   let prediction = [...user.ratings];
+  let unratedItems = getMatchingIndicies(prediction, -1);
+  let userMean = mean(user.ratings);
 
   for (let i = 0; i < unratedItems.length; i++) {
     let numerator = 0;
@@ -83,8 +83,8 @@ function getPrediction(user, users, unratedItems) {
       numerator += users[j].correlation * (users[j].ratings[unratedItems[i]] - mean(users[j].ratings));
       denominator += users[j].correlation;
     }
-    let predictedValue = mean(user.ratings) + (numerator / denominator);
-    prediction[unratedItems[i]] = Math.round(predictedValue * 100) / 100;
+
+    prediction[unratedItems[i]] = userMean + (numerator / denominator);
   }
 
   return prediction
@@ -109,8 +109,8 @@ async function main() {
     let completedMatrix = [];
     for (let i = 0; i < ratingsMatrix.length; i++) {
       if (ratingsMatrix[i].ratings.includes(-1)) {
-        let correlations = getSimilarity(ratingsMatrix[i], removeIndex(ratingsMatrix, i));
-        let prediction = getPrediction(ratingsMatrix[i], nLargestValues(correlations, neighbourhoodSize), getMatchingIndicies(ratingsMatrix[i].ratings, -1));
+        let similarity = getSimilarity(ratingsMatrix[i], removeIndex(ratingsMatrix, i));
+        let prediction = getPrediction(ratingsMatrix[i], getNearestNeighbours(similarity, neighbourhoodSize));
 
         completedMatrix.push(prediction);
       }
@@ -120,7 +120,7 @@ async function main() {
     }
 
     // outputting completed matrix to console
-    for(let x of completedMatrix) console.log(...x);
+    for (let x of completedMatrix) console.log(...x);
     main();
   }
   catch (e) {
